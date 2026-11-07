@@ -1,0 +1,11 @@
+.venv
+.env
+bailian.txt
+.git
+data
+tests
+*.zip
+*.md
+.pytest_cache
+.ruff_cache
+__pycache__

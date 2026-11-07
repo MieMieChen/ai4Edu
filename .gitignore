@@ -1,0 +1,19 @@
+.venv/
+__pycache__/
+.pytest_cache/
+.ruff_cache/
+.env
+# Datasets, model outputs, database snapshots and local runtime stay local.
+data/
+*.zip
+*.db
+*.db-shm
+*.db-wal
+celerybeat-schedule*
+*.egg-info/
+dist/
+bailian.txt
+.DS_Store
+.codex/
+.agents/
+.aws/

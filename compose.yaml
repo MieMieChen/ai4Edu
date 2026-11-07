@@ -1,0 +1,102 @@
+x-app: &app
+  build: .
+  environment: &environment
+    DASHSCOPE_API_KEY: ${DASHSCOPE_API_KEY:-}
+    DASHSCOPE_BASE_URL: ${DASHSCOPE_BASE_URL:-}
+    AI4EDU_CREDENTIALS_FILE: /run/secrets/bailian
+    AI4EDU_MODEL: ${AI4EDU_MODEL:-}
+    AI4EDU_LAYOUT_MODEL: ${AI4EDU_LAYOUT_MODEL:-}
+    AI4EDU_RUBRIC_MODEL: ${AI4EDU_RUBRIC_MODEL:-}
+    AI4EDU_TRANSCRIBE_MODEL: ${AI4EDU_TRANSCRIBE_MODEL:-}
+    AI4EDU_GRADE_MODEL: ${AI4EDU_GRADE_MODEL:-}
+    AI4EDU_VERIFY_MODEL: ${AI4EDU_VERIFY_MODEL:-}
+    AI4EDU_MODEL_PRICES: ${AI4EDU_MODEL_PRICES:?Set AI4EDU_MODEL_PRICES in .env}
+    AI4EDU_MODEL_CONCURRENCY: ${AI4EDU_MODEL_CONCURRENCY:-16}
+    AI4EDU_MODEL_RPM: ${AI4EDU_MODEL_RPM:-120}
+    AI4EDU_MODEL_TPM: ${AI4EDU_MODEL_TPM:-500000}
+    AI4EDU_MAX_OUTPUT_TOKENS: ${AI4EDU_MAX_OUTPUT_TOKENS:-4096}
+    AI4EDU_MAX_TRANSCRIPTION_TOKENS: ${AI4EDU_MAX_TRANSCRIPTION_TOKENS:-8192}
+    AI4EDU_MAX_GRADING_TOKENS: ${AI4EDU_MAX_GRADING_TOKENS:-4096}
+    AI4EDU_MAX_INPUT_TOKENS: ${AI4EDU_MAX_INPUT_TOKENS:-250000}
+    AI4EDU_TRANSCRIPTION_IMAGES_PER_CALL: ${AI4EDU_TRANSCRIPTION_IMAGES_PER_CALL:-1}
+    AI4EDU_TRANSCRIPTION_CONCURRENCY: ${AI4EDU_TRANSCRIPTION_CONCURRENCY:-2}
+    AI4EDU_THINKING_ROLES: ${AI4EDU_THINKING_ROLES:?Set AI4EDU_THINKING_ROLES in .env}
+    AI4EDU_THINKING_BUDGET: ${AI4EDU_THINKING_BUDGET:-1024}
+    AI4EDU_HTTP_TIMEOUT: ${AI4EDU_HTTP_TIMEOUT:-240}
+    AI4EDU_MAX_PIXELS: ${AI4EDU_MAX_PIXELS:-2621440}
+    AI4EDU_REGION_PADDING_RATIO: ${AI4EDU_REGION_PADDING_RATIO:-0.04}
+    AI4EDU_TASK_LEASE_SECONDS: ${AI4EDU_TASK_LEASE_SECONDS:-300}
+    AI4EDU_VERIFICATION_POLICY: ${AI4EDU_VERIFICATION_POLICY:-off}
+    AI4EDU_AUDIT_RATE: ${AI4EDU_AUDIT_RATE:-0.1}
+    AI4EDU_SERVICE_API_KEY: ${AI4EDU_SERVICE_API_KEY:-}
+    AI4EDU_DATABASE_URL: postgresql+psycopg://ai4edu:${POSTGRES_PASSWORD:-ai4edu}@postgres:5432/ai4edu
+    AI4EDU_REDIS_URL: redis://redis:6379/0
+    AI4EDU_STORAGE_BACKEND: ${AI4EDU_STORAGE_BACKEND:-local}
+    AI4EDU_STORAGE_DIR: /app/data/assets
+    AI4EDU_OSS_ENDPOINT: ${AI4EDU_OSS_ENDPOINT:-}
+    AI4EDU_OSS_BUCKET: ${AI4EDU_OSS_BUCKET:-}
+    AI4EDU_OSS_ACCESS_KEY_ID: ${AI4EDU_OSS_ACCESS_KEY_ID:-}
+    AI4EDU_OSS_ACCESS_KEY_SECRET: ${AI4EDU_OSS_ACCESS_KEY_SECRET:-}
+  volumes:
+    - app-data:/app/data
+  secrets: [bailian]
+  depends_on:
+    init:
+      condition: service_completed_successfully
+    redis:
+      condition: service_healthy
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: ai4edu
+      POSTGRES_USER: ai4edu
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-ai4edu}
+    ports: ["127.0.0.1:5432:5432"]
+    volumes: ["postgres-data:/var/lib/postgresql/data"]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ai4edu -d ai4edu"]
+      interval: 3s
+      retries: 20
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--appendonly", "yes"]
+    ports: ["127.0.0.1:6379:6379"]
+    volumes: ["redis-data:/data"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 3s
+      retries: 20
+  init:
+    build: .
+    environment: *environment
+    command: ["ai4edu", "init-db"]
+    secrets: [bailian]
+    depends_on:
+      postgres:
+        condition: service_healthy
+  api:
+    <<: *app
+    ports: ["8000:8000"]
+  preparation:
+    <<: *app
+    command: ["celery", "-A", "ai4edu.tasks:celery", "worker", "-Q", "preparation", "--pool", "threads", "--concurrency", "4", "--loglevel", "INFO"]
+  grading:
+    <<: *app
+    command: ["celery", "-A", "ai4edu.tasks:celery", "worker", "-Q", "grading", "--pool", "threads", "--concurrency", "32", "--loglevel", "INFO"]
+  control:
+    <<: *app
+    command: ["celery", "-A", "ai4edu.tasks:celery", "worker", "-Q", "control", "--pool", "threads", "--concurrency", "1", "--loglevel", "INFO"]
+  scheduler:
+    <<: *app
+    command: ["celery", "-A", "ai4edu.tasks:celery", "beat", "--schedule", "/app/data/celerybeat-schedule", "--loglevel", "INFO"]
+
+volumes:
+  postgres-data:
+  redis-data:
+  app-data:
+
+secrets:
+  bailian:
+    file: ${AI4EDU_CREDENTIALS_FILE:-bailian.txt}

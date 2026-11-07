@@ -1,0 +1,49 @@
+[project]
+name = "ai4edu-grader"
+version = "0.1.0"
+description = "Asynchronous handwritten subjective exam grading with Alibaba Model Studio"
+requires-python = ">=3.11"
+dependencies = [
+  "fastapi>=0.115,<1",
+  "uvicorn[standard]>=0.32,<1",
+  "pydantic-settings>=2.6,<3",
+  "sqlalchemy>=2.0.36,<3",
+  "psycopg[binary]>=3.2,<4",
+  "celery[redis]>=5.4,<6",
+  "httpx>=0.28,<1",
+  "pillow>=11,<13",
+  "numpy>=2,<3",
+  "opencv-python-headless>=4.10,<5",
+  "pymupdf>=1.25,<2",
+  "oss2>=2.19,<3",
+  "python-multipart>=0.0.20,<1",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8,<10", "fakeredis[lua]>=2.26,<3", "ruff>=0.11,<1"]
+paddle = ["paddleocr>=3.3,<4", "paddlepaddle>=3,<4"]
+
+[project.scripts]
+ai4edu = "ai4edu.cli:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/ai4edu"]
+
+[tool.hatch.build.targets.sdist]
+include = ["/src", "/pyproject.toml", "/README.md", "/Dockerfile", "/compose.yaml", "/.env.example"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+ignore = ["E501"]
