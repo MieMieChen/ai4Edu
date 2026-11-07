@@ -1,14 +1,16 @@
-# AI4Edu 主观题评分后端
+# AI4Edu 主观题评分工作台
 
 面向手写数学等主观题的自动评分服务。输入题目、参考解答、各题满分，以及按题图片或整份答卷；输出逐评分点得分、学生证据、理由、考生成绩、任务进度和模型费用记录。没有教师审核步骤。
 
-当前实现服务端与命令行工具，网站可通过 `/v1` 接口接入。已完成真实 PostgreSQL/Redis/Celery/API 与百炼闭环，以及同一细则和裁图下10名学生、50道主观题的 A/B/C 对照。当前保留 B 作为开发配置：Plus 独立转写及主评，Max 生成并核验统一细则；A/B/C 可按批次切换。模型 ID 在配置中指定，不因错误自动替换。
+项目包含浏览器评分工作台、异步服务端和命令行工具。已完成真实 PostgreSQL/Redis/Celery/API 与百炼闭环，以及同一细则和裁图下10名学生、50道主观题的 A/B/C 对照。当前保留 B 作为开发配置：Plus 独立转写及主评，Max 生成并核验统一细则；A/B/C 可按批次切换。模型 ID 在配置中指定，不因错误自动替换。
 
 2026-11-07已完成关闭思考的B基线正式留出质量验收，**未通过**用户预先确认的四项门槛。31名首次运行学生155题，可判定率85.16%、全量成功评分且误差≤1分的比例60.65%、可判定题MAE 1.227分、执行失败15题。验收期间未修改提示词、重试或删题；详细范围见 [验证记录](docs/verification.md)。
 
 当前开发范围收窄为正常朝向、完整的作答输入。示例配置仅为`grade`开启4096 Token思考，转写不启用思考；已裁好的正常按题图片通过`AI4EDU_ORIENT_QUESTION_IMAGES=false`直接进入转写与评分，整卷仍需定位题目。20题正常图开发回归中，思考组首次19题完成、1题HTTP400，显式重试后20题完成；实际响应确认思考生效。关闭与开启思考两组的最终MAE均为1.90分，±1分均为10/20，本轮没有证明整体质量改善，也不是新的独立验收。
 
-运行与实验记录见 [本机运行手册](docs/functional-runbook.md)、[验证记录](docs/verification.md) 和 [千人并发与故障测试](docs/concurrency-loadtest.md)。网站前端尚未建设。
+浏览器入口为 `/demo/`：选择真实批次、考生和题目，查看题干与参考图片、学生作答、固定评分点、转写证据、费用和离线分数对照；也可提交一个有明确预算的单题批次。浏览已有记录不调用模型，点击“开始评分”才会发起新批改。界面直接由 FastAPI 提供，无前端构建步骤和外部 CDN。
+
+完整技术链路、接口契约、并发恢复与实现边界见 [技术工作流](docs/technical-workflow.md)。本机已启动时访问 <http://127.0.0.1:18000/demo/>。面试讲解与五分钟演示顺序见 [演示说明](docs/interview-demo.md)；运行与实验记录见 [本机运行手册](docs/functional-runbook.md)、[验证记录](docs/verification.md) 和 [千人并发与故障测试](docs/concurrency-loadtest.md)。
 
 ## 启动
 
@@ -21,7 +23,7 @@ uv sync --extra dev
 docker compose up --build -d
 ```
 
-容器会显式创建数据库表，随后启动 API、输入准备 Worker、评分 Worker、调度 Worker 和 Celery Beat。接口文档：<http://127.0.0.1:8000/docs>。Compose 将凭据文件作为只读 secret 挂载；文件同时被 Git、Docker 构建上下文和 Python 分发包排除。`AI4EDU_SERVICE_API_KEY` 为网站调用这个后端的独立 Bearer 凭据，设置后所有请求均需携带。
+容器会显式创建数据库表，随后启动 API、输入准备 Worker、评分 Worker、调度 Worker 和 Celery Beat。工作台：<http://127.0.0.1:8000/demo/>，接口文档：<http://127.0.0.1:8000/docs>。Compose 将凭据文件作为只读 secret 挂载；文件同时被 Git、Docker 构建上下文和 Python 分发包排除。`AI4EDU_SERVICE_API_KEY` 为网站调用这个后端的独立 Bearer 凭据，设置后所有 `/v1` 数据接口均需携带。静态工作台和首页跳转公开，工作台可输入该服务凭据；百炼密钥只留在后端。
 
 也可只用 Docker 启动依赖，并在本机调试：
 
@@ -58,6 +60,7 @@ uv run celery -A ai4edu.tasks:celery beat --schedule data/celerybeat-schedule --
 | `AI4EDU_VERIFICATION_POLICY` | `off`：A/B 两阶段对照；`all`：全部独立复判；`risk`：歧义/未解决项/问题标记触发复判，另加确定性抽样 |
 | `AI4EDU_AUDIT_RATE` | risk 模式中普通作答的抽样比例，默认 0.1；属于待评测策略，不代表已验证的质量阈值 |
 | `AI4EDU_THINKING_ROLES`、`AI4EDU_THINKING_BUDGET` | 显式开启思考的角色列表及预算；当前开发示例为`["grade"]`、4096。参数改变会改变成功缓存指纹，真实模型测试应记录生效配置 |
+| `AI4EDU_EVALUATION_LABELS_FILE` | 可选的本地 JSONL 参考分文件，只用于已保存结果的离线比对；不进入评分快照或模型输入。未配置或未完整匹配本批次时，界面明确显示不可用 |
 
 调用要求模型支持图像输入和 JSON Object 输出。协议或思考参数不兼容会明确报错。默认方向判断与版面定位合并为一次视觉调用；裁图、旋转与像素预算由 OpenCV/Pillow 执行。`images.PaddleOrientation` 提供独立的本地方向分类组件，安装 `uv sync --extra paddle` 后可在集成中显式使用；当前默认流程不下载 Paddle 模型。
 
@@ -93,6 +96,7 @@ uv run celery -A ai4edu.tasks:celery beat --schedule data/celerybeat-schedule --
 6. `GET /v1/jobs/{id}/results?offset=0&limit=50`：按考生分页查看成绩、逐题结果及原图区域映射。
 7. `GET /v1/jobs/{id}/export`：流式 JSONL 导出，保留未完成或失败状态。
 8. `POST /v1/jobs/{id}/retry`、`POST /v1/exams/{id}/retry`：重试失败单元，保留通过校验的已有阶段结果。
+9. `GET /v1/workbench`：最近30个批次、真实进度、试卷和模型配置；`GET /v1/jobs/{id}/evaluation`：可选的只读离线比对。所有失败、无法判定和缺失题目保留在预期题数分母中。
 
 试卷请求示例：
 
@@ -135,7 +139,9 @@ uv run celery -A ai4edu.tasks:celery beat --schedule data/celerybeat-schedule --
 }
 ```
 
-按题输入需要覆盖本试卷的所有主观题。需要只判部分题时，为这些题创建对应试卷配置。提交批次支持 `Idempotency-Key` 请求头；相同键与相同请求内容返回同一批次，内容冲突返回409。
+默认需要覆盖本试卷的所有主观题。只判部分题时，在批次顶层指定 `"question_ids": ["15"]`，按题输入完整覆盖所选题目即可；整卷也只定位和评分所选题目。已有试卷、固定细则及累计总预算继续复用，无需复制试卷。工作台的“新建单题批改”使用此接口。
+
+提交批次支持 `Idempotency-Key` 请求头；相同键与相同请求内容返回同一批次，内容冲突返回409。新增选题参数保持旧全卷提交的请求指纹兼容。
 
 每题结果包含：`grade`（逐评分点得分、理由和证据 ID）、`transcript`（证据原文与来源图片）、`verified`、`primary_grade`、`rubric_version`、`prompt_version`。`source_regions` 记录 `source_asset_id`、原图归一化 `bbox`、顺时针校正角度、页序与区域序。通过 `/v1/assets/{id}` 查看原图或裁图。精确分值在评分结构中序列化为十进制字符串。
 
@@ -155,7 +161,8 @@ uv run celery -A ai4edu.tasks:celery beat --schedule data/celerybeat-schedule --
 - 模型初评：A 43/50可判定，B 46/50，C 44/50。在B/C共同可判定的43题上，MAE分别约1.198与1.140，C判题流程费用约为B的4.48倍，当前暂选B。
 - 长题回归：原来4096输出Token截断的同一张图，在8192上限下完整输出4871Token并完成评分；两张作答图的并行转写也完成，结果及调用记录保留。
 - 真实模型调用实测峰值16；1000人模拟模型全链路测试5000题全部正确、唯一、可查询，实际模拟HTTP峰值18；Worker强制终止后自然租约恢复约301秒。
-- 当前代码测试274项通过。模拟模型吞吐用于容量验证，不能推算百炼真实处理速度；现有CSV只有题目总分，不能证明逐步骤数学判断正确。
+- 工作台真实浏览器单题验证：候选样例第17题完成转写与评分，模型10/15、原有参考11分，两次调用，参考费用0.056022元，评分响应含2425个思考Token；共享细则成本另计。这是开发样例验证。
+- 当前代码测试286项通过。模拟模型吞吐用于容量验证，不能推算百炼真实处理速度；现有CSV只有题目总分，不能证明逐步骤数学判断正确。
 
 仓库包含源码、测试、依赖配置和技术文档。原始 ZIP、学生试卷与成绩、整个 `data/` 目录、数据库快照和逐次模型输出均只保留在本地，不随代码上传；运行工具会在本机生成所需目录。下文使用样例的命令需要自行提供本地数据文件。
 

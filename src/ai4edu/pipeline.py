@@ -112,7 +112,13 @@ class Pipeline:
             exam = session.get(ExamRecord, job.exam_id)
             payload, prepared = candidate.payload, dict(candidate.prepared_pages)
             job_id, exam_id = job.id, exam.id
-            question_ids = [q["id"] for q in exam.questions]
+            question_ids = list(
+                session.scalars(
+                    select(AnswerRecord.question_id)
+                    .where(AnswerRecord.candidate_record_id == candidate_id)
+                    .order_by(AnswerRecord.question_id)
+                )
+            )
         cropped = payload["kind"] == "question"
         pages = (
             [(a, answer["question_id"]) for answer in payload["answers"] for a in answer["assets"]]

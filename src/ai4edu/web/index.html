@@ -1,0 +1,132 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <meta name="theme-color" content="#182c2a">
+  <title>AI4Edu · 评分工作台</title>
+  <link rel="stylesheet" href="./app.css">
+  <script src="./app.js" defer></script>
+</head>
+<body>
+  <svg class="icon-definitions" aria-hidden="true" xmlns="http://www.w3.org/2000/svg">
+    <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+    <symbol id="i-chevron" viewBox="0 0 24 24"><path d="m9 5 7 7-7 7"/></symbol>
+    <symbol id="i-refresh" viewBox="0 0 24 24"><path d="M20 7v5h-5M4 17v-5h5"/><path d="M6.1 6.1a8 8 0 0 1 13.2 3.1M4.7 14.8a8 8 0 0 0 13.2 3.1"/></symbol>
+    <symbol id="i-file" viewBox="0 0 24 24"><path d="M14 3H6a1 1 0 0 0-1 1v16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V8zM14 3v5h5M8 12h8M8 16h6"/></symbol>
+    <symbol id="i-check" viewBox="0 0 24 24"><path d="m5 12 4 4L19 6"/></symbol>
+    <symbol id="i-image" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="3"/><circle cx="8" cy="8" r="1.5"/><path d="m3 17 5-5 4 4 4-6 5 7"/></symbol>
+    <symbol id="i-link" viewBox="0 0 24 24"><path d="m10 13 4-4M8 15l-1 1a4 4 0 0 1-6-6l5-5a4 4 0 0 1 6 0M16 9l1-1a4 4 0 0 1 6 6l-5 5a4 4 0 0 1-6 0" transform="translate(0 0) scale(.92)"/></symbol>
+    <symbol id="i-download" viewBox="0 0 24 24"><path d="M12 3v12m-5-5 5 5 5-5M4 16v4h16v-4"/></symbol>
+    <symbol id="i-upload" viewBox="0 0 24 24"><path d="M12 16V4m-5 5 5-5 5 5M4 16v4h16v-4"/></symbol>
+    <symbol id="i-close" viewBox="0 0 24 24"><path d="m6 6 12 12M6 18 18 6"/></symbol>
+    <symbol id="i-info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 11v6M12 7h.01"/></symbol>
+    <symbol id="i-minus" viewBox="0 0 24 24"><path d="M5 12h14"/></symbol>
+    <symbol id="i-key" viewBox="0 0 24 24"><circle cx="8" cy="8" r="5"/><path d="m12 12 9 9m-4-4 3-3m-6 0 3-3"/></symbol>
+  </svg>
+
+  <a class="skip-link" href="#main">跳到评分结果</a>
+  <aside class="sidebar" aria-label="批改批次">
+    <a class="brand" href="./" aria-label="AI4Edu 评分工作台首页">
+      <span class="brand-mark" aria-hidden="true"><span></span><span></span><span></span></span>
+      <span class="brand-copy"><strong>AI4Edu<span class="brand-dot">.</span></strong><small>让评分有据可循</small></span>
+    </a>
+    <div class="sidebar-section-title"><span>真实运行记录</span><span id="jobCount" class="sidebar-count">—</span></div>
+    <nav id="jobList" class="job-list" aria-label="选择批改批次"><p class="sidebar-empty">正在读取批次…</p></nav>
+    <div class="sidebar-bottom">
+      <p class="sidebar-note"><span class="small-dot"></span>回放现有记录，不产生模型调用</p>
+      <details id="authDetails" class="auth-details">
+        <summary><svg class="icon"><use href="#i-key"></use></svg><span>服务访问凭据</span><svg class="icon chevron"><use href="#i-chevron"></use></svg></summary>
+        <form id="authForm" class="auth-form">
+          <label for="serviceToken">服务 Bearer token <span>可选</span></label>
+          <input id="serviceToken" name="service_token" type="password" autocomplete="off" spellcheck="false" placeholder="仅用于本地服务鉴权">
+          <p>此处填写服务凭据，不是模型 API Key。仅保存在当前标签页。</p>
+          <button class="button auth-button" type="submit">应用并重新读取</button>
+        </form>
+      </details>
+      <div class="sidebar-footnote"><span>评分工作台</span><span>LOCAL DEMO</span></div>
+    </div>
+  </aside>
+
+  <div class="app-shell">
+    <header class="topbar">
+      <div class="breadcrumb"><span>AI4Edu</span><svg class="icon"><use href="#i-chevron"></use></svg><strong>评分工作台</strong></div>
+      <div class="topbar-actions"><span id="connectionState" class="connection-state"><span class="small-dot"></span><span id="connectionText">正在连接</span></span><button id="refreshButton" class="icon-button" type="button" title="重新读取运行记录" aria-label="重新读取运行记录"><svg class="icon"><use href="#i-refresh"></use></svg></button></div>
+    </header>
+
+    <main id="main" class="main" tabindex="-1">
+      <div class="page-heading">
+        <div><p class="eyebrow"><span class="small-dot"></span>真实运行记录</p><h1 id="examTitle">主观题评分工作台</h1><p id="batchDescription" class="page-description">从原始作答到逐项评分，每一分都有依据。</p></div>
+        <button id="newJobButton" class="button button-primary" type="button"><svg class="icon"><use href="#i-plus"></use></svg>新建单题批改</button>
+      </div>
+
+      <div id="appAlert" class="app-alert" role="alert" hidden><svg class="icon"><use href="#i-info"></use></svg><p id="alertMessage"></p><button id="alertAuthButton" class="button button-small" type="button" hidden>填写服务凭据</button><button id="dismissAlert" class="icon-button" type="button" aria-label="关闭提示"><svg class="icon"><use href="#i-close"></use></svg></button></div>
+      <div id="loadingState" class="page-state" role="status"><span class="loading-indicator" aria-hidden="true"></span><h2>正在读取运行记录</h2><p>加载已保存的评分、作答图片与证据。</p></div>
+      <div id="emptyState" class="page-state" hidden><div class="empty-illustration" aria-hidden="true"><svg class="icon"><use href="#i-file"></use></svg></div><h2 id="emptyTitle">还没有批改记录</h2><p id="emptyDescription">选择已准备好的题目，提交一份作答即可开始。</p><button id="emptyRefreshButton" class="button button-secondary" type="button">重新读取</button></div>
+
+      <section id="workspace" aria-label="批次结果" hidden>
+        <div class="metrics-grid">
+          <div class="metric"><span class="metric-label">处理进度</span><div class="metric-value"><span id="progressValue">—</span><span id="batchState" class="tag">读取中</span></div><p id="progressDescription">—</p></div>
+          <div class="metric"><span class="metric-label">已知费用 <span class="metric-unit">CNY</span></span><div id="costValue" class="metric-value">—</div><p id="costDescription">—</p></div>
+          <div class="metric"><span class="metric-label">模型调用</span><div class="metric-value"><span id="callsValue">—</span><span class="metric-suffix">次</span></div><p id="tokensDescription">—</p></div>
+          <button id="evaluationMetric" class="metric metric-button" type="button" aria-controls="evaluationDetails"><span class="metric-label">±1 分一致率 <svg class="icon"><use href="#i-chevron"></use></svg></span><span id="qualityValue" class="metric-value">—</span><span id="qualityDescription" class="metric-description">小样本离线参考</span></button>
+        </div>
+
+        <div class="selection-bar">
+          <div class="select-field candidate-field"><label for="candidateSelect">考生</label><div class="select-wrap"><select id="candidateSelect" disabled><option>读取中</option></select><svg class="icon"><use href="#i-chevron"></use></svg></div></div>
+          <div class="select-field question-field"><label for="questionSelect">题目</label><div class="select-wrap"><select id="questionSelect" disabled><option>读取中</option></select><svg class="icon"><use href="#i-chevron"></use></svg></div></div>
+          <div class="candidate-pagination" aria-label="考生分页"><span id="candidatePage">—</span><button id="previousPage" class="icon-button previous" type="button" aria-label="上一页考生" disabled><svg class="icon"><use href="#i-chevron"></use></svg></button><button id="nextPage" class="icon-button" type="button" aria-label="下一页考生" disabled><svg class="icon"><use href="#i-chevron"></use></svg></button></div>
+        </div>
+
+        <details id="questionDetails" class="question-details"><summary><div><span id="questionNumber" class="question-number">题目</span><span id="questionPreview">选择一份作答</span></div><span class="question-expand">题干与参考解答<svg class="icon"><use href="#i-chevron"></use></svg></span></summary><div class="question-body"><h3>题干</h3><p id="questionContent" class="preserve-lines"></p><div id="questionImages" class="material-images" aria-label="题干图片" hidden></div><h3>参考解答</h3><p id="referenceContent" class="preserve-lines"></p><div id="referenceImages" class="material-images" aria-label="参考解答图片" hidden></div></div></details>
+
+        <div class="reading-grid">
+          <div class="source-column">
+            <section class="panel source-panel" aria-labelledby="sourceHeading">
+              <div class="panel-heading"><h2 id="sourceHeading"><svg class="icon"><use href="#i-image"></use></svg>作答图片</h2><span class="quiet-label">作答材料</span></div>
+              <div class="image-toolbar"><div id="sourceTabs" class="source-tabs" role="group" aria-label="作答图片"></div><div class="zoom-controls"><button id="zoomOut" class="icon-button" type="button" aria-label="缩小图片"><svg class="icon"><use href="#i-minus"></use></svg></button><button id="zoomReset" class="zoom-reset" type="button" title="适应窗口">适应</button><button id="zoomIn" class="icon-button" type="button" aria-label="放大图片"><svg class="icon"><use href="#i-plus"></use></svg></button></div></div>
+              <div id="imageViewport" class="image-viewport"><div id="imageStage" class="image-stage"><img id="answerImage" class="source-image" alt="当前考生的作答图片" hidden></div><div id="imageFeedback" class="image-feedback" role="status">正在读取作答图片…</div></div>
+              <div class="source-caption"><span id="sourceInfo">—</span><button id="openImageButton" class="text-button" type="button" disabled>查看原尺寸<svg class="icon"><use href="#i-chevron"></use></svg></button></div>
+              <div class="evidence-note"><svg class="icon"><use href="#i-link"></use></svg><span>点击评分证据，定位转写行与对应作答图片</span></div>
+            </section>
+
+            <details id="transcriptDetails" class="panel transcript-panel"><summary class="panel-heading"><h2>转写证据 <span id="transcriptCount" class="count-label">—</span></h2><span class="detail-toggle">逐行查看<svg class="icon"><use href="#i-chevron"></use></svg></span></summary><div id="transcriptLines" class="transcript-lines"></div><div id="transcriptIssues" class="transcript-issues" hidden></div><p class="transcript-note">转写保留原意；模糊、涂改与异常单独标记。定位精度为图片级。</p></details>
+          </div>
+
+          <section class="panel scoring-panel" aria-labelledby="scoringHeading">
+            <div class="panel-heading"><h2 id="scoringHeading">逐项评分</h2><span id="answerStatus" class="tag">—</span></div>
+            <div class="score-overview"><div><span class="score-label">本题模型得分</span><div class="score-total"><strong id="scoreValue">—</strong><span>/ <span id="scoreMax">—</span><small> 分</small></span></div></div><div class="score-aside"><span id="verificationMeta" class="verification-meta">—</span><span id="scoreSummary" class="quiet-label">按固定评分标准计算</span></div></div>
+            <div id="offlineAnswer" class="offline-answer"><div><span class="offline-label">离线参考分</span><strong id="referenceScore">—</strong></div><span class="offline-divider"></span><div><span class="offline-label">绝对误差</span><strong id="absoluteError">—</strong></div><span id="offlineAnswerNote" class="offline-answer-note">仅用于事后评估</span></div>
+            <div id="answerIssues" class="answer-issues" role="status" hidden></div>
+            <div class="criteria-heading"><span>评分项与判断依据</span><span>得分 / 满分</span></div>
+            <div id="criteriaList" class="criteria-list"></div>
+            <details id="rubricDetails" class="rubric-details"><summary>查看评分说明<svg class="icon"><use href="#i-chevron"></use></svg></summary><div id="rubricContent"></div></details>
+          </section>
+        </div>
+
+        <details id="evaluationDetails" class="panel evaluation-panel"><summary class="panel-heading"><h2>离线评估说明</h2><span class="detail-toggle">本批次<svg class="icon"><use href="#i-chevron"></use></svg></span></summary><div id="evaluationContent" class="evaluation-content"></div><p class="evaluation-note">小样本离线参考，仅用于当前样本的演示与核对。参考标签只与已保存结果做离线比对，不参与模型评分请求。顶部一致率以全部预期题目为分母；未完成、失败和缺失记录保留在分母中。</p></details>
+
+        <footer class="workspace-footer"><div><span id="runtimeMeta">—</span><span id="jobIdentifier" class="job-identifier">—</span></div><button id="exportButton" class="button button-secondary button-small" type="button"><svg class="icon"><use href="#i-download"></use></svg>导出原始 JSONL</button></footer>
+      </section>
+    </main>
+  </div>
+
+  <dialog id="gradingDialog" class="grading-dialog" aria-labelledby="gradingTitle" aria-describedby="gradingDescription">
+    <div class="modal-heading"><div><p class="eyebrow">新建单题批改</p><h2 id="gradingTitle">提交一份真实作答</h2></div><button id="closeDialogButton" class="icon-button" type="button" aria-label="关闭新建批改"><svg class="icon"><use href="#i-close"></use></svg></button></div>
+    <p id="gradingDescription" class="modal-description">选用已准备好的题目与评分标准，上传作答后运行转写和评分。</p>
+    <form id="gradingForm">
+      <fieldset id="gradingFields" class="grading-fields">
+        <div class="form-field"><label for="liveExam">试卷</label><select id="liveExam" name="exam_id" required></select></div>
+        <div class="form-row"><div class="form-field"><label for="liveQuestion">题目</label><select id="liveQuestion" name="question_id" required></select></div><div class="form-field"><label for="liveCandidate">考生编号</label><input id="liveCandidate" name="candidate_id" maxlength="128" required autocomplete="off" spellcheck="false"></div></div>
+        <div class="form-field"><label for="liveFile">作答文件</label><label class="file-drop" for="liveFile"><svg class="icon"><use href="#i-upload"></use></svg><strong id="fileLabel">选择一份作答文件</strong><span>JPEG、PNG、WebP 或 PDF · 支持多页 PDF</span><input id="liveFile" type="file" name="file" accept="image/jpeg,image/png,image/webp,application/pdf,.jpg,.jpeg,.png,.webp,.pdf" required></label></div>
+        <div class="form-field"><label for="liveBudget">本批次预算上限 <span>人民币</span></label><div class="budget-input"><span>¥</span><input id="liveBudget" name="budget_cny" type="number" value="0.50" min="0.01" step="0.01" required inputmode="decimal"></div></div>
+      </fieldset>
+      <div class="budget-review"><div><span>本次预算上限</span><strong id="budgetPreview">¥0.50</strong></div><p>新批次已知费用：尚未发起模型调用。</p><p>点击“开始评分”后才会上传并发起真实模型调用，实际费用按运行记录计量，预算上限不是预估报价。</p><p id="examBudgetNote"></p><span class="strategy-note">策略 B · 原图转写 → 按固定标准评分</span></div>
+      <div id="liveError" class="live-error" role="alert" hidden></div>
+      <div id="liveProgress" class="live-progress" role="status" hidden></div>
+      <div class="modal-actions"><button id="cancelDialogButton" class="button button-secondary" type="button">取消</button><button id="startGradingButton" class="button button-primary" type="submit"><svg class="icon"><use href="#i-plus"></use></svg><span>开始评分</span></button></div>
+    </form>
+  </dialog>
+</body>
+</html>

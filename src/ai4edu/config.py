@@ -26,6 +26,7 @@ class Settings(BaseSettings):
     storage_dir: Path = Path("data/assets")
     service_api_key: SecretStr | None = None
     credentials_file: Path | None = None
+    evaluation_labels_file: Path | None = None
     api_key: SecretStr | None = Field(
         default=None,
         validation_alias=AliasChoices(
@@ -72,7 +73,12 @@ class Settings(BaseSettings):
     oss_access_key_secret: SecretStr | None = None
 
     @field_validator(
-        "api_key", "service_api_key", "oss_access_key_secret", "credentials_file", mode="before"
+        "api_key",
+        "service_api_key",
+        "oss_access_key_secret",
+        "credentials_file",
+        "evaluation_labels_file",
+        mode="before",
     )
     @classmethod
     def empty_secret(cls, value):

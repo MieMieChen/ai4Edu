@@ -24,7 +24,9 @@ colima start --activate=false --ssh-config=false
 .venv/bin/python scripts/serve_local.py
 ```
 
-API 文档：<http://127.0.0.1:18000/docs>。日志在 `data/runtime/{api,preparation,grading,control,scheduler}.log`；`services.json` 记录本次 supervisor 与子进程 PID。依赖容器可用同一 Compose 命令的 `stop postgres redis` 停止，不删除数据卷。
+评分工作台：<http://127.0.0.1:18000/demo/>，API 文档：<http://127.0.0.1:18000/docs>。日志在 `data/runtime/{api,preparation,grading,control,scheduler}.log`；`services.json` 记录本次 supervisor 与子进程 PID。依赖容器可用同一 Compose 命令的 `stop postgres redis` 停止，不删除数据卷。
+
+本机 `.env` 的 `AI4EDU_EVALUATION_LABELS_FILE=data/evaluation/2026-11-07/labels.jsonl` 为工作台启用独立参考分对照。仅对实际对应这些样例的考生编号与题号使用此文件，其他试卷需改用自己的标签。标签未配置或不能完整匹配批次时，不展示一致率。浏览已有批次、证据和离线评估不会新增模型调用。
 
 标准全容器部署仍使用根目录 `compose.yaml` 和 README 的命令。本轮真实验证采用上面的依赖容器与本机应用组合，不能把它写成完整应用镜像的运行验证。
 

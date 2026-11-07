@@ -68,6 +68,7 @@ CandidateInput = Annotated[QuestionCandidate | PaperCandidate, Field(discriminat
 
 class JobInput(Schema):
     exam_id: str
+    question_ids: list[str] | None = Field(default=None, min_length=1)
     candidates: list[CandidateInput] = Field(min_length=1, max_length=1000)
     budget_cny: Decimal | None = Field(default=None, gt=0, max_digits=16, decimal_places=8)
     strategy: Literal["A", "B", "C"] | None = None
@@ -76,6 +77,8 @@ class JobInput(Schema):
     def unique_candidates(self):
         if len({c.candidate_id for c in self.candidates}) != len(self.candidates):
             raise ValueError("考生编号重复")
+        if self.question_ids is not None and len(set(self.question_ids)) != len(self.question_ids):
+            raise ValueError("选题不能重复")
         return self
 
 

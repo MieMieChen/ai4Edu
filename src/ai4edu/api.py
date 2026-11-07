@@ -4,7 +4,17 @@ import secrets
 from decimal import Decimal
 from typing import Annotated
 
-from fastapi import Depends, FastAPI, File, Header, HTTPException, Query, Response, UploadFile
+from fastapi import (
+    Depends,
+    FastAPI,
+    File,
+    Header,
+    HTTPException,
+    Query,
+    Request,
+    Response,
+    UploadFile,
+)
 from fastapi.responses import StreamingResponse
 from PIL import UnidentifiedImageError
 from pymupdf import FileDataError
@@ -27,6 +37,7 @@ from ai4edu.db import (
 from ai4edu.execution import freeze_settings, strategy_settings
 from ai4edu.schemas import ExamInput, JobInput
 from ai4edu.storage import make_storage
+from ai4edu.workbench import install_workbench
 
 TERMINAL = {"scored", "ungradable", "failed"}
 
@@ -74,6 +85,7 @@ def job_summary(db: Database, job: JobRecord) -> dict:
             "committed_cost_cny": job.committed_cost,
             "model_calls": len(calls),
             "unpriced_or_unknown_calls": sum(c.cost is None for c in calls),
+            "unknown_usage_calls": sum(c.usage is None for c in calls),
             "input_tokens": sum((c.usage or {}).get("prompt_tokens", 0) for c in calls),
             "output_tokens": sum((c.usage or {}).get("completion_tokens", 0) for c in calls),
         }
@@ -82,7 +94,10 @@ def job_summary(db: Database, job: JobRecord) -> dict:
 def create_app(settings: Settings | None = None) -> FastAPI:
     settings = settings or get_settings()
 
-    def authenticate(authorization: Annotated[str | None, Header()] = None):
+    def authenticate(request: Request, authorization: Annotated[str | None, Header()] = None):
+        if request.url.path == "/":
+            # The root only redirects to the public static shell; /v1 always needs auth.
+            return
         if settings.service_api_key is not None:
             expected = f"Bearer {settings.service_api_key.get_secret_value()}"
             if authorization is None or not secrets.compare_digest(authorization, expected):
@@ -188,8 +203,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         idempotency_key: Annotated[str | None, Header(min_length=1, max_length=128)] = None,
     ):
         config = strategy_settings(settings, payload.strategy) if payload.strategy else settings
+        fingerprint_payload = payload.model_dump(mode="json")
+        if payload.question_ids is None:
+            # Keep idempotency hashes of existing full-exam submissions unchanged.
+            fingerprint_payload.pop("question_ids")
         fingerprint = hashlib.sha256(
-            json.dumps(payload.model_dump(mode="json"), sort_keys=True).encode()
+            json.dumps(fingerprint_payload, sort_keys=True).encode()
         ).hexdigest()
         with db.session() as session:
             if idempotency_key:
@@ -206,12 +225,17 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             if exam.state != "ready":
                 raise HTTPException(409, "试卷评分细则尚未准备完成")
             expected = {q["id"] for q in exam.questions}
+            if payload.question_ids is not None:
+                if not set(payload.question_ids) <= expected:
+                    raise HTTPException(422, "选题包含试卷中不存在的题号")
+                expected = set(payload.question_ids)
+            selected_questions = [q for q in exam.questions if q["id"] in expected]
             identifiers = []
             for candidate in payload.candidates:
                 if candidate.kind == "question":
                     if {a.question_id for a in candidate.answers} != expected:
                         raise HTTPException(
-                            422, "按题输入必须覆盖试卷中的所有主观题，且不能包含未知题号"
+                            422, "按题输入必须完整覆盖所选主观题，且不能包含其他题号"
                         )
                     identifiers.extend(a for answer in candidate.answers for a in answer.assets)
                 else:
@@ -244,7 +268,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     AnswerRecord(
                         id=uid(), job_id=job.id, candidate_record_id=record.id, question_id=q["id"]
                     )
-                    for q in exam.questions
+                    for q in selected_questions
                 )
                 messages.append(Outbox(task="prepare_candidate", unit_id=record.id))
             try:
@@ -407,4 +431,5 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             session.commit()
             return job_summary(db, job)
 
+    install_workbench(app, db, settings)
     return app
