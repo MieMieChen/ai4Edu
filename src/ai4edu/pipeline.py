@@ -6,6 +6,7 @@ from functools import partial
 from sqlalchemy import select, update
 
 from ai4edu import prompts
+from ai4edu.answer_templates import ensure_complete_regions, validate_box_ids, validate_page_size
 from ai4edu.assets import AssetStore
 from ai4edu.bailian import BailianClient, ModelImage
 from ai4edu.calls import Calls
@@ -22,7 +23,15 @@ from ai4edu.db import (
 )
 from ai4edu.images import crop_and_rotate, image_info, pad_region_boxes
 from ai4edu.limits import RateLimitWait, RedisLimiter
-from ai4edu.schemas import CriterionScore, Judgment, PageLayout, Question, Rubric, Transcript
+from ai4edu.schemas import (
+    AnswerTemplate,
+    CriterionScore,
+    Judgment,
+    PageLayout,
+    Question,
+    Rubric,
+    Transcript,
+)
 from ai4edu.scoring import finalize_grade, needs_verification, validate_rubric, validate_transcript
 
 
@@ -105,6 +114,54 @@ class Pipeline:
             exam.execution_token = None
             session.commit()
 
+    def prepare_fixed_boxes(self, candidate_id, token, template, payload, question_ids, prepared):
+        regions = template.regions(set(question_ids))
+        if payload["kind"] == "paper":
+            if len(payload["pages"]) != len(template.pages):
+                raise ValueError("整卷页数与答题框模板不一致")
+            for index in {region["page_index"] for region in regions}:
+                image = self.assets.image(payload["pages"][index])
+                validate_page_size(template.pages[index], image.width, image.height)
+            sources = {
+                region["box_id"]: payload["pages"][region["page_index"]] for region in regions
+            }
+        else:
+            sources = {}
+            for answer in payload["answers"]:
+                validate_box_ids(template, answer["question_id"], answer.get("box_ids"))
+                sources.update(zip(answer["box_ids"], answer["assets"], strict=True))
+        for region in regions:
+            source_id = sources[region["box_id"]]
+            key = f"fixed:{template.version}:{region['box_id']}:{source_id}"
+            if key in prepared:
+                continue
+            bbox = region["bbox"] if payload["kind"] == "paper" else None
+            image = self.assets.image(source_id)
+            data = crop_and_rotate(image.data, bbox, 0, self.settings.max_pixels)
+            # Identical blank boxes still need distinct image IDs for evidence ownership.
+            derived = self.assets.put_image(data, deduplicate=False)
+            prepared[key] = [
+                {
+                    "question_id": region["question_id"],
+                    "box_id": region["box_id"],
+                    "subquestion_id": region["subquestion_id"],
+                    "asset_id": derived.id,
+                    "source_asset_id": source_id,
+                    "bbox": bbox,
+                    "template_bbox": region["bbox"],
+                    "detected_bbox": None,
+                    "rotation": 0,
+                    "page_index": region["page_index"],
+                    "order": region["order"],
+                    "template_version": template.version,
+                }
+            ]
+            with self.db.session() as session:
+                candidate = lock_unit(session, CandidateRecord, candidate_id, token)
+                candidate.prepared_pages = dict(prepared)
+                session.commit()
+        return prepared
+
     def prepare_candidate(self, candidate_id: str, token: str):
         with self.db.session() as session:
             candidate = session.get(CandidateRecord, candidate_id)
@@ -112,6 +169,11 @@ class Pipeline:
             exam = session.get(ExamRecord, job.exam_id)
             payload, prepared = candidate.payload, dict(candidate.prepared_pages)
             job_id, exam_id = job.id, exam.id
+            template = (
+                AnswerTemplate.model_validate(job.answer_template)
+                if job.answer_template is not None
+                else None
+            )
             question_ids = list(
                 session.scalars(
                     select(AnswerRecord.question_id)
@@ -125,6 +187,11 @@ class Pipeline:
             if cropped
             else [(a, None) for a in payload["pages"]]
         )
+        if template is not None:
+            prepared = self.prepare_fixed_boxes(
+                candidate_id, token, template, payload, question_ids, prepared
+            )
+            pages = []
         calls = self.calls("prepare_candidate", candidate_id, exam_id, token, job_id)
 
         def valid_layout(value):
@@ -195,10 +262,17 @@ class Pipeline:
                     for r in page
                     if r["question_id"] == answer.question_id
                 ]
+                if template is not None:
+                    ensure_complete_regions(template, answer.question_id, regions)
                 if not regions:
                     changes = {"state": "failed", "error": "未定位到该题作答区域；不按零分处理"}
                 else:
-                    ordered = sorted(regions, key=lambda r: (r["page_index"], r["order"]))
+                    ordered = sorted(
+                        regions,
+                        key=(lambda r: r["order"])
+                        if template is not None
+                        else (lambda r: (r["page_index"], r["order"])),
+                    )
                     changes = {"assets": ordered, "state": "queued", "error": None}
                     if answer.assets != ordered:
                         changes.update(intermediate={}, result=None)
@@ -234,6 +308,15 @@ class Pipeline:
             rubric = Rubric.model_validate(exam.rubrics[question.id])
             intermediate, source_regions = dict(answer.intermediate), answer.assets
             exam_id, job_id, step = exam.id, job.id, exam.score_step
+            template = (
+                AnswerTemplate.model_validate(job.answer_template)
+                if job.answer_template is not None
+                else None
+            )
+        if template is not None:
+            ensure_complete_regions(template, question.id, source_regions)
+            if any(r.get("template_version") != template.version for r in source_regions):
+                raise ValueError("答题框检查点与批次固定模板版本不一致")
         if not source_regions:
             raise ValueError("该题没有作答图片，必须先完成题目定位")
         images = self.images([r["asset_id"] for r in source_regions])
@@ -369,7 +452,13 @@ class Pipeline:
                 judgment = calls.complete(
                     grading_role,
                     Judgment,
-                    prompts.grading_prompt(question, rubric, transcript, str(step)),
+                    prompts.grading_prompt(
+                        question,
+                        rubric,
+                        transcript,
+                        str(step),
+                        source_regions=source_regions if template is not None else None,
+                    ),
                     images + self.images(question.question_assets),
                     validate=lambda value: finalize_grade(rubric, transcript, value, Decimal(step)),
                 )
@@ -405,6 +494,8 @@ class Pipeline:
             "rubric_version": hashlib.sha256(rubric.model_dump_json().encode()).hexdigest(),
             "prompt_version": prompts.VERSION,
         }
+        if template is not None:
+            result["answer_template_version"] = template.version
         with self.db.session() as session:
             answer = lock_unit(session, AnswerRecord, answer_id, token)
             answer.result, answer.state = result, grade.status

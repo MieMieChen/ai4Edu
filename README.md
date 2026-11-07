@@ -12,6 +12,8 @@
 
 完整技术链路、接口契约、并发恢复与实现边界见 [技术工作流](docs/technical-workflow.md)。本机已启动时访问 <http://127.0.0.1:18000/demo/>。面试讲解与五分钟演示顺序见 [演示说明](docs/interview-demo.md)；运行与实验记录见 [本机运行手册](docs/functional-runbook.md)、[验证记录](docs/verification.md) 和 [千人并发与故障测试](docs/concurrency-loadtest.md)。
 
+固定位置答题卡已支持[试卷模板、多框归属和完整性校验](docs/fixed-answer-template.md)：按模板提取全部框，保留空白框，按题输入通过框ID逐一对应；批次保存独立模板快照，缺框不能继续评分。该模式要求页面已转正并对齐，不自动修改框位置。升级代码后先执行`ai4edu init-db`添加模板字段。
+
 ## 启动
 
 需要 Python 3.11+、uv；完整服务需要 PostgreSQL、Redis 和支持 Compose 的 Docker 环境。
@@ -97,6 +99,7 @@ uv run celery -A ai4edu.tasks:celery beat --schedule data/celerybeat-schedule --
 7. `GET /v1/jobs/{id}/export`：流式 JSONL 导出，保留未完成或失败状态。
 8. `POST /v1/jobs/{id}/retry`、`POST /v1/exams/{id}/retry`：重试失败单元，保留通过校验的已有阶段结果。
 9. `GET /v1/workbench`：最近30个批次、真实进度、试卷和模型配置；`GET /v1/jobs/{id}/evaluation`：可选的只读离线比对。所有失败、无法判定和缺失题目保留在预期题数分母中。
+10. `PUT /v1/exams/{id}/answer-template`：配置未来批次的固定答题框；也可在新建试卷时提供`answer_template`，详见[完整请求示例](docs/fixed-answer-template.md)。
 
 试卷请求示例：
 
@@ -162,7 +165,7 @@ uv run celery -A ai4edu.tasks:celery beat --schedule data/celerybeat-schedule --
 - 长题回归：原来4096输出Token截断的同一张图，在8192上限下完整输出4871Token并完成评分；两张作答图的并行转写也完成，结果及调用记录保留。
 - 真实模型调用实测峰值16；1000人模拟模型全链路测试5000题全部正确、唯一、可查询，实际模拟HTTP峰值18；Worker强制终止后自然租约恢复约301秒。
 - 工作台真实浏览器单题验证：候选样例第17题完成转写与评分，模型10/15、原有参考11分，两次调用，参考费用0.056022元，评分响应含2425个思考Token；共享细则成本另计。这是开发样例验证。
-- 当前代码测试286项通过。模拟模型吞吐用于容量验证，不能推算百炼真实处理速度；现有CSV只有题目总分，不能证明逐步骤数学判断正确。
+- 当前代码测试364项通过。模拟模型吞吐用于容量验证，不能推算百炼真实处理速度；现有CSV只有题目总分，不能证明逐步骤数学判断正确。
 
 仓库包含源码、测试、依赖配置和技术文档。原始 ZIP、学生试卷与成绩、整个 `data/` 目录、数据库快照和逐次模型输出均只保留在本地，不随代码上传；运行工具会在本机生成所需目录。下文使用样例的命令需要自行提供本地数据文件。
 

@@ -12,10 +12,12 @@ class AssetStore:
     def __init__(self, db: Database, storage: Storage):
         self.db, self.storage = db, storage
 
-    def put_image(self, data: bytes) -> Asset:
+    def put_image(self, data: bytes, *, deduplicate: bool = True) -> Asset:
         digest = hashlib.sha256(data).hexdigest()
         with self.db.session() as session:
-            existing = session.scalar(select(Asset).where(Asset.sha256 == digest))
+            existing = (
+                session.scalar(select(Asset).where(Asset.sha256 == digest)) if deduplicate else None
+            )
             if existing is not None:
                 return existing
             _, width, height = image_info(data)

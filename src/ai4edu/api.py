@@ -21,6 +21,7 @@ from pymupdf import FileDataError
 from sqlalchemy import func, select, update
 from sqlalchemy.exc import IntegrityError
 
+from ai4edu.answer_templates import validate_box_ids
 from ai4edu.assets import AssetStore
 from ai4edu.config import Settings, get_settings
 from ai4edu.db import (
@@ -35,7 +36,7 @@ from ai4edu.db import (
     uid,
 )
 from ai4edu.execution import freeze_settings, strategy_settings
-from ai4edu.schemas import ExamInput, JobInput
+from ai4edu.schemas import AnswerTemplate, ExamInput, JobInput
 from ai4edu.storage import make_storage
 from ai4edu.workbench import install_workbench
 
@@ -75,6 +76,12 @@ def job_summary(db: Database, job: JobRecord) -> dict:
             "id": job.id,
             "exam_id": job.exam_id,
             "execution_config": job.execution_config,
+            "answer_template": job.answer_template,
+            "answer_template_version": (
+                AnswerTemplate.model_validate(job.answer_template).version
+                if job.answer_template is not None
+                else None
+            ),
             "state": state,
             "total": total,
             "completed": completed,
@@ -153,13 +160,25 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 id=uid(),
                 title=payload.title,
                 questions=[q.model_dump(mode="json") for q in payload.questions],
+                answer_template=(
+                    payload.answer_template.model_dump(mode="json")
+                    if payload.answer_template is not None
+                    else None
+                ),
                 score_step=payload.score_step,
                 budget_cny=payload.budget_cny,
             )
             session.add(exam)
             session.add(Outbox(task="prepare_exam", unit_id=exam.id))
             session.commit()
-            return {"id": exam.id, "state": exam.state}
+            return {
+                "id": exam.id,
+                "state": exam.state,
+                "answer_template": exam.answer_template,
+                "answer_template_version": (
+                    payload.answer_template.version if payload.answer_template is not None else None
+                ),
+            }
 
     @app.get("/v1/exams/{exam_id}")
     def get_exam(exam_id: str):
@@ -172,10 +191,34 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 "state": exam.state,
                 "title": exam.title,
                 "questions": exam.questions,
+                "answer_template": exam.answer_template,
+                "answer_template_version": (
+                    AnswerTemplate.model_validate(exam.answer_template).version
+                    if exam.answer_template is not None
+                    else None
+                ),
                 "rubrics": exam.rubrics,
                 "error": exam.error,
                 "budget_cny": exam.budget_cny,
                 "committed_cost_cny": exam.committed_cost,
+            }
+
+    @app.put("/v1/exams/{exam_id}/answer-template")
+    def set_answer_template(exam_id: str, payload: AnswerTemplate):
+        with db.session() as session:
+            exam = session.get(ExamRecord, exam_id, with_for_update=True)
+            if exam is None:
+                raise HTTPException(404, "试卷不存在")
+            try:
+                payload.validate_questions({q["id"] for q in exam.questions})
+            except ValueError as exc:
+                raise HTTPException(422, str(exc)) from exc
+            exam.answer_template = payload.model_dump(mode="json")
+            session.commit()
+            return {
+                "id": exam.id,
+                "answer_template": exam.answer_template,
+                "answer_template_version": payload.version,
             }
 
     @app.post("/v1/exams/{exam_id}/retry", status_code=202)
@@ -207,6 +250,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         if payload.question_ids is None:
             # Keep idempotency hashes of existing full-exam submissions unchanged.
             fingerprint_payload.pop("question_ids")
+        for candidate in fingerprint_payload["candidates"]:
+            for answer in candidate.get("answers", []):
+                if answer["box_ids"] is None:
+                    answer.pop("box_ids")
         fingerprint = hashlib.sha256(
             json.dumps(fingerprint_payload, sort_keys=True).encode()
         ).hexdigest()
@@ -219,7 +266,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     if existing.fingerprint != fingerprint:
                         raise HTTPException(409, "同一个幂等键对应的提交内容不同")
                     return job_summary(db, existing)
-            exam = session.get(ExamRecord, payload.exam_id)
+            exam = session.get(ExamRecord, payload.exam_id, with_for_update=True)
             if exam is None:
                 raise HTTPException(404, "试卷不存在")
             if exam.state != "ready":
@@ -230,6 +277,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     raise HTTPException(422, "选题包含试卷中不存在的题号")
                 expected = set(payload.question_ids)
             selected_questions = [q for q in exam.questions if q["id"] in expected]
+            template = (
+                AnswerTemplate.model_validate(exam.answer_template)
+                if exam.answer_template is not None
+                else None
+            )
             identifiers = []
             for candidate in payload.candidates:
                 if candidate.kind == "question":
@@ -238,7 +290,17 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                             422, "按题输入必须完整覆盖所选主观题，且不能包含其他题号"
                         )
                     identifiers.extend(a for answer in candidate.answers for a in answer.assets)
+                    for answer in candidate.answers:
+                        if template is not None:
+                            try:
+                                validate_box_ids(template, answer.question_id, answer.box_ids)
+                            except ValueError as exc:
+                                raise HTTPException(422, str(exc)) from exc
+                        elif answer.box_ids is not None:
+                            raise HTTPException(422, "使用答题框ID前必须配置试卷答题框模板")
                 else:
+                    if template is not None and len(candidate.pages) != len(template.pages):
+                        raise HTTPException(422, "整卷页数与固定答题框模板不一致，不能遗漏页面")
                     identifiers.extend(candidate.pages)
             require_assets(session, identifiers)
             if payload.budget_cny is not None:
@@ -253,6 +315,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 idempotency_key=idempotency_key,
                 fingerprint=fingerprint,
                 execution_config=freeze_settings(config),
+                answer_template=exam.answer_template,
                 budget_cny=payload.budget_cny,
             )
             candidate_rows, answer_rows, messages = [], [], []

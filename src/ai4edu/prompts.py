@@ -64,9 +64,14 @@ def transcription_prompt() -> str:
 
 
 def grading_prompt(
-    question: Question, rubric: Rubric, transcript: Transcript, step: str = "0.5"
+    question: Question,
+    rubric: Rubric,
+    transcript: Transcript,
+    step: str = "0.5",
+    *,
+    source_regions: list[dict] | None = None,
 ) -> str:
-    return (
+    prompt = (
         "结合学生作答原图和转写，按固定细则逐点评分。"
         "必须恰好覆盖每一个 criterion_id，正向给分引用真实且清楚的证据 id。"
         "任何正分项的 evidence_ids 只能引用 status=clear 的行；绝对不要引用 unclear 或 crossed_out。"
@@ -83,3 +88,22 @@ def grading_prompt(
         + "\n忠实转写："
         + transcript.model_dump_json()
     )
+    if source_regions is not None:
+        prompt += (
+            "\n固定答题框映射（已按完整模板收齐，包含空白框）："
+            + json.dumps(
+                [
+                    {
+                        key: region[key]
+                        for key in ("box_id", "question_id", "subquestion_id", "asset_id", "order")
+                    }
+                    for region in source_regions
+                ],
+                ensure_ascii=False,
+            )
+            + "\nasset_id对应转写的image_id。必须阅读本题全部框，"
+            "按subquestion_id将证据匹配到相应小问的评分点，不能把其他小问的论证当作该小问的答案。"
+            "同一小问可能跨多个框，必须合并阅读；subquestion_id为空表示整道题共享框。"
+            "框存在不表示其中有作答；不得补写空白部分，也不能只根据第一个框判断整题空白。"
+        )
+    return prompt

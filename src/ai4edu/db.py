@@ -71,6 +71,7 @@ class ExamRecord(LeasedUnit, Base):
     id: Mapped[str] = mapped_column(String(32), primary_key=True, default=uid)
     title: Mapped[str] = mapped_column(String(200))
     questions: Mapped[list] = mapped_column(JSON)
+    answer_template: Mapped[dict | None] = mapped_column(JSON)
     score_step: Mapped[Decimal] = mapped_column(Numeric(8, 3))
     budget_cny: Mapped[Decimal | None] = mapped_column(Numeric(16, 8))
     committed_cost: Mapped[Decimal] = mapped_column(Numeric(16, 8), default=0)
@@ -88,6 +89,7 @@ class JobRecord(Base):
     idempotency_key: Mapped[str | None] = mapped_column(String(128), unique=True)
     fingerprint: Mapped[str] = mapped_column(String(64))
     execution_config: Mapped[dict] = mapped_column(JSON, default=dict)
+    answer_template: Mapped[dict | None] = mapped_column(JSON)
     budget_cny: Mapped[Decimal | None] = mapped_column(Numeric(16, 8))
     committed_cost: Mapped[Decimal] = mapped_column(Numeric(16, 8), default=0)
     created_at: Mapped[datetime] = mapped_column(default=now)
@@ -167,6 +169,11 @@ class Database:
 
     def create_all(self):
         Base.metadata.create_all(self.engine)
+        for table in ("exams", "jobs"):
+            columns = {column["name"] for column in inspect(self.engine).get_columns(table)}
+            if "answer_template" not in columns:
+                with self.engine.begin() as connection:
+                    connection.execute(text(f"ALTER TABLE {table} ADD COLUMN answer_template JSON"))
         # Explicit init-db also performs the additive v0.1 -> execution snapshot upgrade.
         columns = {column["name"] for column in inspect(self.engine).get_columns("jobs")}
         if "execution_config" not in columns:
