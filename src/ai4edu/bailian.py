@@ -65,7 +65,15 @@ class BailianClient:
                 ],
             },
         )
-        response.raise_for_status()
+        try:
+            response.raise_for_status()
+        except httpx.HTTPStatusError as exc:
+            detail = response.text.replace(self.settings.api_key.get_secret_value(), "[REDACTED]")
+            raise httpx.HTTPStatusError(
+                f"模型服务请求失败（HTTP {response.status_code}）：{detail[:2000]}",
+                request=exc.request,
+                response=exc.response,
+            ) from exc
         return response.json()
 
     def close(self):

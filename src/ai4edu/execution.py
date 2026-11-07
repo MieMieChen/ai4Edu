@@ -24,6 +24,7 @@ EXECUTION_FIELDS = {
     "http_timeout",
     "max_pixels",
     "region_padding_ratio",
+    "orient_question_images",
     "verification_policy",
     "audit_rate",
     "prompt_version",
@@ -50,7 +51,11 @@ def execution_settings(settings: Settings, frozen: dict) -> Settings:
             "max_input_tokens",
             "transcription_images_per_call",
         )
-    ) | {"transcription_concurrency": 2, "region_padding_ratio": 0.0}
+    ) | {
+        "transcription_concurrency": 2,
+        "region_padding_ratio": 0.0,
+        "orient_question_images": True,
+    }
     return Settings(
         _env_file=None,
         **(

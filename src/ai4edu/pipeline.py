@@ -130,13 +130,17 @@ class Pipeline:
             if cache_key in prepared:
                 continue
             image = self.assets.image(asset_id)
-            layout = calls.complete(
-                "layout",
-                PageLayout,
-                prompts.layout_prompt(question_ids, cropped=cropped),
-                self.images([asset_id]),
-                validate=valid_layout,
-            )
+            if cropped and not self.settings.orient_question_images:
+                rotation = 0
+            else:
+                layout = calls.complete(
+                    "layout",
+                    PageLayout,
+                    prompts.layout_prompt(question_ids, cropped=cropped),
+                    self.images([asset_id]),
+                    validate=valid_layout,
+                )
+                rotation = layout.rotation
             if cropped:
                 regions = [(question_id, None, 0, None)]
             else:
@@ -151,7 +155,7 @@ class Pipeline:
                 ]
             mapped = []
             for qid, box, order, detected_box in regions:
-                data = crop_and_rotate(image.data, box, layout.rotation, self.settings.max_pixels)
+                data = crop_and_rotate(image.data, box, rotation, self.settings.max_pixels)
                 derived = self.assets.put_image(data)
                 mapped.append(
                     {
@@ -160,7 +164,7 @@ class Pipeline:
                         "source_asset_id": asset_id,
                         "bbox": box,
                         "detected_bbox": detected_box,
-                        "rotation": layout.rotation,
+                        "rotation": rotation,
                         "page_index": page_index,
                         "order": order,
                     }

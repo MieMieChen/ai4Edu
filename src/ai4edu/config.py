@@ -58,6 +58,7 @@ class Settings(BaseSettings):
     http_timeout: float = Field(default=120, gt=0)
     max_pixels: int = Field(default=2621440, ge=65536)
     region_padding_ratio: float = Field(default=0.04, ge=0, le=0.25)
+    orient_question_images: bool = True
     max_upload_mb: int = Field(default=30, gt=0)
     model_concurrency: int = Field(default=8, gt=0)
     model_rpm: int = Field(default=60, gt=0)

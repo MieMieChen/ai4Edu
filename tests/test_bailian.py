@@ -66,3 +66,26 @@ def test_provider_error_propagates_without_model_fallback():
     with pytest.raises(httpx.HTTPStatusError):
         client.request("grade", Result, "grade", [])
     assert len(attempts) == 1
+
+
+def test_provider_error_explains_rejection_without_exposing_api_key():
+    def handler(request):
+        return httpx.Response(
+            400,
+            json={"error": {"code": "InvalidParameter", "message": "budget invalid secret"}},
+        )
+
+    client = BailianClient(
+        Settings(_env_file=None, api_key=SecretStr("secret"), model="chosen"),
+        transport=httpx.MockTransport(handler),
+    )
+    try:
+        with pytest.raises(httpx.HTTPStatusError) as caught:
+            client.request("grade", Result, "grade", [])
+    finally:
+        client.close()
+    message = str(caught.value)
+    assert "InvalidParameter" in message
+    assert "budget invalid" in message
+    assert "secret" not in message
+    assert caught.value.response.status_code == 400
